@@ -771,7 +771,7 @@ def psd_inv_cholesky(matrix: chex.Array, damping: chex.Array) -> chex.Array:
   if matrix.shape[:1] != matrix.shape[1:]:
     raise ValueError(f"Expected square matrix, but got shape {matrix.shape}.")
 
-  identity = jnp.eye(matrix.shape[0])
+  identity = jnp.eye(matrix.shape[0], dtype=matrix.dtype)
 
   return linalg.solve(matrix + damping * identity, identity, assume_a="pos")
 
@@ -824,6 +824,7 @@ def pi_adjusted_kronecker_inverse(
 
   # kron(arrays) = c * kron(us)
   c = jnp.exp(jnp.sum(jnp.log(jnp.stack(norms)) - jnp.log(jnp.stack(dims))))
+  damping = damping.astype(c.dtype)
 
   def regular_inverse() -> Tuple[chex.Array, ...]:
 
@@ -842,7 +843,7 @@ def pi_adjusted_kronecker_inverse(
     for a in us:
 
       if a.size == 1:
-        inv = jnp.ones_like(a)
+        inv = jnp.ones_like(a, dtype=a.dtype)
 
       elif a.ndim == 2:
         inv = psd_inv_cholesky(a, d_hat)
@@ -864,10 +865,10 @@ def pi_adjusted_kronecker_inverse(
     for a in us:
 
       if a.ndim == 2:
-        inv = jnp.eye(a.shape[0])
+        inv = jnp.eye(a.shape[0], dtype=a.dtype)
 
       else:
-        inv = jnp.ones_like(a)
+        inv = jnp.ones_like(a, dtype=a.dtype)
 
       a_hats_inv.append(inv / c_k)
 
@@ -1090,7 +1091,8 @@ def safe_psd_eigh(
   # of cuda and cudablas they can cause a runtime error.
   s, q = lax.cond(
       jnp.any(jnp.isnan(x)),
-      lambda _: (jnp.full([d], jnp.nan), jnp.full([d, d], jnp.nan)),
+      lambda _: (jnp.full([d], jnp.nan, x.dtype),  # pylint: disable=g-long-lambda
+                 jnp.full([d, d], jnp.nan, x.dtype)),
       functools.partial(_eigh, force_on_host=force_on_host),
       x,
   )
@@ -1228,10 +1230,14 @@ class WeightedMovingAverage:
     self.raw_value = pmean_if_pmap(self.raw_value, pmap_axis_name)
 
   @classmethod
-  def zero(cls, shape: chex.Shape) -> "WeightedMovingAverage":
+  def zero(
+      cls,
+      shape: chex.Shape,
+      dtype: Optional[chex.ArrayDType] = None,
+  ) -> "WeightedMovingAverage":
     """Initializes a `WeightedMovingAverage` with a single array of zeros."""
     return WeightedMovingAverage(
-        weight=jnp.zeros([]), raw_value=jnp.zeros(shape))
+        weight=jnp.zeros([], dtype), raw_value=jnp.zeros(shape, dtype))
 
   @classmethod
   def zeros_like(cls, value: PyTree) -> "WeightedMovingAverage":
